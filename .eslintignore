@@ -1,0 +1,7 @@
+**/node_modules/**
+packages/*/lib/**
+packages/camera-handler/**
+packages/camera-handler-2/**
+packages/camera-handler-cli/**
+
+.eslintrc.js

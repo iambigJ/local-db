@@ -1,0 +1,25 @@
+{
+  "name": "databaser",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "migrate": "node ./migrations/migrate.js",
+    "seed": "node ./seeds/seed.js"
+  },
+  "author": "Your Name",
+  "license": "ISC",
+  "description": "A Node.js project for interacting with a PostgreSQL database.",
+  "devDependencies": {
+    "@types/node": "^20.8.10",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "eslint": "^9.14.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-prettier": "^5.2.2"
+  },
+  "dependencies": {
+    "async-mutex": "^0.5.0",
+    "js-yaml": "^4.1.0"
+  }
+}
