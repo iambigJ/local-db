@@ -134,10 +134,13 @@ opt
 .nx
 npm.sh
 
-.idea
+.idea/**
 
 **/config.yaml
 **/.npmrc
 **/secrets
 
  .clinic
+
+ storage/**
+

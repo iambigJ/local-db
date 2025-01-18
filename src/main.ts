@@ -7,13 +7,18 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.useGlobalPipes(
     new ValidationPipe({
+      transform: true,
+      whitelist: false,
       enableDebugMessages: true,
       skipUndefinedProperties: false,
-      skipNullProperties: false,
+      skipNullProperties: true,
       skipMissingProperties: false,
       forbidNonWhitelisted: false,
     }),
   );
-  await app.listen(app.get(ConfigService).get('Http_Port'));
+
+  await app.listen(app.get(ConfigService).get('HTTP_PORT')).then(() => {
+    console.log(app.get(ConfigService).get('HTTP_PORT'));
+  });
 }
 bootstrap();

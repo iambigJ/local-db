@@ -2,17 +2,16 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-  BadRequestException,
+  BadRequestException, UnprocessableEntityException,
 } from '@nestjs/common';
 import { MyLogger } from '../../common/custom-logger';
-import { DataFileRepo } from './repository/repository';
+import { LocalStore } from './repository/local-store';
 
 @Injectable()
-export class DataFileService {
-  private logger = new MyLogger(DataFileService.name);
+export class LocalStoreService {
+  private logger = new MyLogger(LocalStoreService.name);
 
-  constructor(private readonly dataFileRepo: DataFileRepo) {}
-
+  constructor(private readonly dataFileRepo: LocalStore) {}
 
   public async createCollection(tableName: string): Promise<void> {
     this.logger.log(`Creating table/collection: ${tableName}`);
@@ -20,10 +19,9 @@ export class DataFileService {
       await this.dataFileRepo.createCollection(tableName);
     } catch (error) {
       this.logger.error(`createTable error: ${error.message}`);
-      throw new InternalServerErrorException(error.message);
+      throw new UnprocessableEntityException(error.message);
     }
   }
-
 
   public async deleteTable(tableName: string): Promise<void> {
     this.logger.log(`Deleting table/collection: ${tableName}`);
@@ -121,7 +119,6 @@ export class DataFileService {
       throw new InternalServerErrorException(error.message);
     }
   }
-
 
   public async deleteRecord(
     tableName: string,

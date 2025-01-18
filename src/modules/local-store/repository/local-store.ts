@@ -4,32 +4,31 @@ import * as yaml from 'js-yaml';
 import { Mutex } from 'async-mutex';
 import { ConfigService } from '@nestjs/config';
 import { MyLogger } from '../../../common/custom-logger';
+import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 
 interface IndexRecord {
   id: string;
   isBinary: boolean;
 }
 
-/**
- * DataFileRepo
- * ------------
- * A file-based store that can store either text-based (JSON/YAML) or binary records
- * depending on a Boolean flag. Concurrency is handled via per-collection mutexes.
- */
-export class DataFileRepo {
-  private logger: MyLogger = new MyLogger(DataFileRepo.name);
-
-  // One Mutex per collection
+@Injectable()
+export class LocalStore {
+  private logger: MyLogger = new MyLogger(LocalStore.name);
   private mutexes: Map<string, Mutex>;
-  // Path to root storage directory
   private baseDir: string;
-  // Either "yaml" or "json"
   private storageType: string;
-  // Caches the index for each collection in memory
   private indexCache: Map<string, IndexRecord[]>;
 
   constructor(private configService: ConfigService) {
     this.baseDir = this.configService.get<string>('STORAGE_PATH') || 'storage';
+    if (!this.baseDir) {
+      this.logger.warn(`STORAGE_PATH not configured, using default "storage"`);
+      this.baseDir = 'storage';
+    } else if (typeof this.baseDir !== 'string') {
+      this.logger.error(`Invalid STORAGE_PATH value: "${this.baseDir}"`);
+      throw new Error(`Invalid STORAGE_PATH configuration.`);
+    }
     this.storageType =
       this.configService.get<string>('SDD_STORE_TYPE') || 'json';
     this.mutexes = new Map();
@@ -48,9 +47,6 @@ export class DataFileRepo {
     return path.join(this.baseDir, collectionName);
   }
 
-  // ---------------------------------------------------------------------------
-  // Collection Management
-  // ---------------------------------------------------------------------------
   public async createCollection(collectionName: string): Promise<void> {
     this.logger.log(`Creating collection: ${collectionName}`);
     const collectionPath = this.getCollectionPath(collectionName);
@@ -78,14 +74,6 @@ export class DataFileRepo {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Record Insertion / Retrieval / Updating / Deletion
-  // ---------------------------------------------------------------------------
-  /**
-   * Insert a new record into the given collection.
-   * If isBinary = true, then `record` should be a Buffer.
-   * Otherwise, `record` should be a standard JavaScript object.
-   */
   public async insertRecord(
     collectionName: string,
     record: any,
@@ -99,12 +87,9 @@ export class DataFileRepo {
     return mutex.runExclusive(async () => {
       const index = await this.getIndex(collectionName);
 
-      const recordId = Date.now().toString();
-
-      // Write the record to disk
+      const recordId = randomUUID();
       await this.writeRecord(collectionName, recordId, record, isBinary);
 
-      // Update the in-memory index
       index.push({ id: recordId, isBinary });
       await this.updateIndex(collectionName, index);
 
@@ -115,10 +100,6 @@ export class DataFileRepo {
     });
   }
 
-  /**
-   * Retrieve a single record by ID. If the record is binary, returns a Buffer.
-   * If the record is text-based (JSON/YAML), returns an object.
-   */
   public async getRecord(
     collectionName: string,
     recordId: string,
@@ -132,14 +113,9 @@ export class DataFileRepo {
       );
       return null;
     }
-    // Read accordingly
     return this.readRecord(collectionName, recordId, entry.isBinary);
   }
 
-  /**
-   * Retrieve multiple records. If a record is binary, it is returned as a Buffer.
-   * Otherwise, returned as an object.
-   */
   public async getRecords(
     collectionName: string,
     limit?: number,
@@ -157,7 +133,6 @@ export class DataFileRepo {
     for (let i = start; i < Math.min(index.length, end); i++) {
       const { id, isBinary } = index[i];
       const record = await this.readRecord(collectionName, id, isBinary);
-      // If record is missing from disk, log a warning but keep going
       if (!record) {
         this.logger.warn(
           `Record "${id}" was in index but not found on disk in "${collectionName}".`,
@@ -172,10 +147,6 @@ export class DataFileRepo {
     return records;
   }
 
-  /**
-   * Update an existing record. If isBinary=true, `newData` is written as binary.
-   * If isBinary=false, `newData` is written as text (JSON/YAML).
-   */
   public async updateRecord(
     collectionName: string,
     recordId: string,
@@ -198,11 +169,9 @@ export class DataFileRepo {
           `Record "${recordId}" not found in collection "${collectionName}"`,
         );
       }
-
-      // Overwrite the record with new data
-      await this.writeRecord(collectionName, recordId, newData, isBinary);
-
-      // If the binary flag has changed, we must also update it in the index
+      const data = await this.getRecord(collectionName, recordId);
+      Object.assign(data, newData);
+      await this.writeRecord(collectionName, recordId, data, isBinary);
       if (entry.isBinary !== isBinary) {
         entry.isBinary = isBinary;
         await this.updateIndex(collectionName, index);
@@ -214,9 +183,6 @@ export class DataFileRepo {
     });
   }
 
-  /**
-   * Delete a record by ID (both from the file system and from the index).
-   */
   public async deleteRecord(
     collectionName: string,
     recordId: string,
@@ -226,6 +192,7 @@ export class DataFileRepo {
 
     await mutex.runExclusive(async () => {
       const index = await this.getIndex(collectionName);
+      console.log(index);
       const entry = index.find((item) => item.id === recordId);
       if (!entry) {
         this.logger.error(
@@ -235,11 +202,8 @@ export class DataFileRepo {
           `Record "${recordId}" not found in collection "${collectionName}"`,
         );
       }
-
-      // Remove from index
       const updatedIndex = index.filter((item) => item.id !== recordId);
 
-      // Remove the file from disk
       const filePath = this.getRecordFilePath(
         collectionName,
         recordId,
@@ -254,31 +218,22 @@ export class DataFileRepo {
         }
       });
 
-      // Persist updated index
       await this.updateIndex(collectionName, updatedIndex);
       this.logger.log(`Record "${recordId}" deleted successfully.`);
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal / Utility Methods
-  // ---------------------------------------------------------------------------
-  private async ensureDirExists(dirPath: string): Promise<void> {
+  private async ensureDirExists(dirPath: string): Promise<any> {
     try {
-      await fs.mkdir(dirPath, { recursive: true });
+      await fs.mkdir(dirPath);
     } catch (err) {
-      if (err.code !== 'EEXIST') {
-        this.logger.error(
-          `Error creating directory "${dirPath}": ${err.message}`,
-        );
-        throw err;
-      }
+      this.logger.error(
+        `Error creating directory "${dirPath}": ${err.message}`,
+      );
+      throw err;
     }
   }
 
-  /**
-   * Returns the path of the index file (index.json or index.yaml) for a collection.
-   */
   private getIndexFilePath(collectionName: string): string {
     return path.join(
       this.getCollectionPath(collectionName),
@@ -303,13 +258,10 @@ export class DataFileRepo {
     );
   }
 
-  /**
-   * Write a record to disk, either as binary or as text (JSON/YAML).
-   */
   private async writeRecord(
     collectionName: string,
     recordId: string,
-    data: any, // could be an object or a Buffer
+    data: any,
     isBinary: boolean,
   ): Promise<void> {
     const filePath = this.getRecordFilePath(collectionName, recordId, isBinary);
@@ -322,7 +274,6 @@ export class DataFileRepo {
       }
       await this.writeBinaryFile(filePath, data);
     } else {
-      // data must be a JS object
       if (Buffer.isBuffer(data)) {
         throw new Error(
           `Expected an object for text record "${recordId}" in "${collectionName}", but got a Buffer.`,
@@ -341,7 +292,6 @@ export class DataFileRepo {
 
     try {
       if (isBinary) {
-        // read file as Buffer
         return await fs.readFile(filePath);
       } else {
         const fileContent = await fs.readFile(filePath, 'utf-8');
@@ -401,7 +351,6 @@ export class DataFileRepo {
     if (this.indexCache.has(collectionName)) {
       return this.indexCache.get(collectionName)!;
     }
-
     this.logger.log(`Loading index from disk for "${collectionName}"`);
     const indexPath = this.getIndexFilePath(collectionName);
 
