@@ -6,15 +6,18 @@ import { Mutex } from 'async-mutex';
 const BASE_DIR = path.resolve(__dirname, 'data');
 const STORE_TYPE = process.env.SDD_STORE_TYPE || 'json';
 
-class Database {
+export class DataFileRepo {
   private baseDir: string;
   private mutexes: Map<string, Mutex>;
+  private storeType: string
   private indexCache: Map<string, string[]>; // Cache for indices
 
   constructor(baseDir: string) {
     this.baseDir = baseDir;
+    this.storeType = STORE_TYPE;
     this.mutexes = new Map();
     this.indexCache = new Map();
+
   }
 
   private getFileExtension(): string {
@@ -239,4 +242,4 @@ class Database {
   }
 }
 
-export const db = new Database(BASE_DIR);
+export const db = new DataFileRepo(BASE_DIR);
